@@ -13,5 +13,6 @@ python -m pip install -e ".[torch,metrics]"
 ## 启动
 
 ```sh
+$ conda activate llama-factory
 $ ./start.sh
 ```
