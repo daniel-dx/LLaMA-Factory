@@ -76,7 +76,7 @@ def fix_valuehead_checkpoint(
             state_dict: dict[str, torch.Tensor] = {key: f.get_tensor(key) for key in f.keys()}
     else:
         path_to_checkpoint = os.path.join(output_dir, WEIGHTS_NAME)
-        state_dict: dict[str, torch.Tensor] = torch.load(path_to_checkpoint, map_location="cpu")
+        state_dict: dict[str, torch.Tensor] = torch.load(path_to_checkpoint, map_location="cpu", weights_only=True)
 
     os.remove(path_to_checkpoint)
     decoder_state_dict, v_head_state_dict = {}, {}
@@ -161,13 +161,12 @@ class PissaConvertCallback(TrainerCallback):
                 model.save_pretrained(pissa_backup_dir, safe_serialization=args.save_safetensors)
                 setattr(model.peft_config["default"], "init_lora_weights", init_lora_weights)
                 model.save_pretrained(
-                    pissa_convert_dir, safe_serialization=args.save_safetensors, convert_pissa_to_lora=pissa_init_dir
-                )  # TODO: use `path_initial_model_for_weight_conversion` (peft>=0.12.0)
+                    pissa_convert_dir,
+                    safe_serialization=args.save_safetensors,
+                    path_initial_model_for_weight_conversion=pissa_init_dir,
+                )
                 model.load_adapter(pissa_backup_dir, "default", is_trainable=True)
                 model.set_adapter("default")
-                if "pissa_init" in model.peft_config.keys():  # backward compatibility (peft<0.12.0)
-                    model.delete_adapter("pissa_init")
-
                 setattr(model.peft_config["default"], "init_lora_weights", init_lora_weights)
 
 
@@ -189,7 +188,7 @@ class LogCallback(TrainerCallback):
         self.webui_mode = is_env_enabled("LLAMABOARD_ENABLED")
         if self.webui_mode and not use_ray():
             signal.signal(signal.SIGABRT, self._set_abort)
-            self.logger_handler = logging.LoggerHandler(os.environ.get("LLAMABOARD_WORKDIR"))
+            self.logger_handler = logging.LoggerHandler(os.getenv("LLAMABOARD_WORKDIR"))
             logging.add_handler(self.logger_handler)
             transformers.logging.add_handler(self.logger_handler)
 

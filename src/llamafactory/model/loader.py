@@ -21,6 +21,7 @@ from transformers import (
     AutoModelForCausalLM,
     AutoModelForImageTextToText,
     AutoModelForSeq2SeqLM,
+    AutoModelForTextToWaveform,
     AutoModelForVision2Seq,
     AutoProcessor,
     AutoTokenizer,
@@ -81,10 +82,10 @@ def load_tokenizer(model_args: "ModelArguments") -> "TokenizerModule":
             padding_side="right",
             **init_kwargs,
         )
-    except ValueError:  # try the fast one
+    except ValueError:  # try another one
         tokenizer = AutoTokenizer.from_pretrained(
             model_args.model_name_or_path,
-            use_fast=True,
+            use_fast=not model_args.use_fast_tokenizer,
             padding_side="right",
             **init_kwargs,
         )
@@ -92,17 +93,31 @@ def load_tokenizer(model_args: "ModelArguments") -> "TokenizerModule":
         raise OSError("Failed to load tokenizer.") from e
 
     patch_tokenizer(tokenizer, model_args)
+
     try:
-        processor = AutoProcessor.from_pretrained(model_args.model_name_or_path, **init_kwargs)
-        patch_processor(processor, tokenizer, model_args)
+        processor = AutoProcessor.from_pretrained(
+            model_args.model_name_or_path,
+            use_fast=model_args.use_fast_tokenizer,
+            **init_kwargs,
+        )
+    except ValueError:  # try another one
+        processor = AutoProcessor.from_pretrained(
+            model_args.model_name_or_path,
+            use_fast=not model_args.use_fast_tokenizer,
+            **init_kwargs,
+        )
     except Exception as e:
-        logger.debug(f"Processor was not found: {e}.")
+        logger.info_rank0(f"Failed to load processor: {e}.")
         processor = None
 
     # Avoid load tokenizer, see:
     # https://github.com/huggingface/transformers/blob/v4.40.0/src/transformers/models/auto/processing_auto.py#L324
     if processor is not None and "Processor" not in processor.__class__.__name__:
+        logger.debug("The loaded processor is not an instance of Processor. Dropping it.")
         processor = None
+
+    if processor is not None:
+        patch_processor(processor, tokenizer, model_args)
 
     return {"tokenizer": tokenizer, "processor": processor}
 
@@ -132,7 +147,7 @@ def load_model(
         if model_args.adapter_name_or_path is not None:
             lazy_load = True
         elif is_trainable:
-            model = load_unsloth_pretrained_model(config, model_args)
+            model = load_unsloth_pretrained_model(config, model_args, finetuning_args)
 
     if model is None and not lazy_load:
         init_kwargs["config"] = config
@@ -147,6 +162,8 @@ def load_model(
                 load_class = AutoModelForImageTextToText
             elif type(config) in AutoModelForSeq2SeqLM._model_mapping.keys():  # audio-text
                 load_class = AutoModelForSeq2SeqLM
+            elif type(config) in AutoModelForTextToWaveform._model_mapping.keys():  # audio hack for qwen2_5_omni
+                load_class = AutoModelForTextToWaveform
             else:
                 load_class = AutoModelForCausalLM
 
@@ -154,6 +171,8 @@ def load_model(
                 model = load_class.from_config(config, trust_remote_code=model_args.trust_remote_code)
             else:
                 model = load_class.from_pretrained(**init_kwargs)
+                if getattr(model.config, "model_type", None) == "qwen2_5_omni":
+                    model = model.thinker  # use part of Omni model
 
         if model_args.mixture_of_depths == "convert":
             model = convert_pretrained_model_to_mod(model, config, model_args)

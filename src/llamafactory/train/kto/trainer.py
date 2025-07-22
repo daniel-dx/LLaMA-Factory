@@ -34,7 +34,6 @@ from ..trainer_utils import create_custom_optimizer, create_custom_scheduler, ge
 
 
 if TYPE_CHECKING:
-    import torch.utils.data
     from transformers import PreTrainedModel, ProcessorMixin
 
     from ...hparams import FinetuningArguments
@@ -119,17 +118,17 @@ class CustomKTOTrainer(KTOTrainer):
         return super().create_scheduler(num_training_steps, optimizer)
 
     @override
-    def _get_train_sampler(self) -> Optional["torch.utils.data.Sampler"]:
+    def _get_train_sampler(self, *args, **kwargs) -> Optional["torch.utils.data.Sampler"]:
         r"""Replace the sequential sampler of KTO Trainer created by trl with the random sampler."""
         if self.finetuning_args.disable_shuffling:
             return torch.utils.data.SequentialSampler(self.train_dataset)
 
-        return Trainer._get_train_sampler(self)
+        return Trainer._get_train_sampler(self, *args, **kwargs)
 
     @override
-    def get_batch_samples(self, epoch_iterator, num_batches):
+    def get_batch_samples(self, *args, **kwargs):
         r"""Replace the method of KTO Trainer with the one of the standard Trainer."""
-        return Trainer.get_batch_samples(self, epoch_iterator, num_batches)
+        return Trainer.get_batch_samples(self, *args, **kwargs)
 
     @override
     def forward(
@@ -146,6 +145,9 @@ class CustomKTOTrainer(KTOTrainer):
 
         if "pixel_values" in batch:
             model_inputs["pixel_values"] = batch["pixel_values"]
+
+        if "image_sizes" in batch:
+            model_inputs["image_sizes"] = batch["image_sizes"]
 
         if "image_grid_thw" in batch:
             model_inputs["image_grid_thw"] = batch["image_grid_thw"]
